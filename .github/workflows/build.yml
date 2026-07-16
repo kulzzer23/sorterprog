@@ -1,15 +1,17 @@
-name: Build EXE
+name: Build and Release EXE
 
-# Запускать сборку при каждом пуше в ветку main, 
-# а также оставить кнопку для ручного запуска (workflow_dispatch)
 on:
   push:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
+# Критически важная настройка: даем боту права на создание релизов
+permissions:
+  contents: write
+
 jobs:
   build-windows:
-    runs-on: windows-latest # Гитхаб выделит машину на Windows
+    runs-on: windows-latest
 
     steps:
     - name: Checkout repository
@@ -27,14 +29,16 @@ jobs:
         pip install -r requirements.txt
 
     - name: Build with PyInstaller
-      # --noconfirm: перезаписывать папку dist без вопросов
-      # --onefile: собрать всё в один .exe
-      # --windowed: скрыть черное окно консоли Windows при запуске GUI
       run: |
         pyinstaller --noconfirm --onefile --windowed --name "ImageTagger" main.py
 
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
       with:
-        name: ImageTagger-Windows-EXE
-        path: dist/ImageTagger.exe
+        # Указываем путь к нашему собранному exe-файлу
+        files: dist/ImageTagger.exe
+        # Генерируем уникальное название и тег на основе номера запуска
+        tag_name: "v1.0.${{ github.run_number }}"
+        name: "ImageTagger Build #${{ github.run_number }}"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
