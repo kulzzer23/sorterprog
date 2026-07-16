@@ -1,0 +1,40 @@
+name: Build EXE
+
+# Запускать сборку при каждом пуше в ветку main, 
+# а также оставить кнопку для ручного запуска (workflow_dispatch)
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest # Гитхаб выделит машину на Windows
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller
+        pip install -r requirements.txt
+
+    - name: Build with PyInstaller
+      # --noconfirm: перезаписывать папку dist без вопросов
+      # --onefile: собрать всё в один .exe
+      # --windowed: скрыть черное окно консоли Windows при запуске GUI
+      run: |
+        pyinstaller --noconfirm --onefile --windowed --name "ImageTagger" main.py
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ImageTagger-Windows-EXE
+        path: dist/ImageTagger.exe

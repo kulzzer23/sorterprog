@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QLineEdit, 
                              QFileDialog, QListWidget, QListWidgetItem, QMessageBox,
                              QProgressDialog, QComboBox, QInputDialog, QFrame)
-from PyQt6.QtGui import QPixmap, QIcon
+from PyQt6.QtGui import QPixmap, QIcon, QMovie
 from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal
 
 IMGBB_API_KEY = "ea9bc80bf3bddd99f0633e65deea3ac9"
@@ -49,15 +49,13 @@ class UploaderThread(QThread):
         self.export_path = export_path
         
     def run(self):
-        # Собираем фото, у которых есть описание
         items_to_upload = [(path, data) for path, data in self.project_data.items() if data['desc'].strip()]
         total = len(items_to_upload)
         
         if total == 0:
-            self.finished_upload.emit(False, "Нет фотографий с описанием для загрузки.")
+            self.finished_upload.emit(False, "Нет фотографий или гифок с описанием для загрузки.")
             return
 
-        # Группируем по альбомам для красивого вывода
         grouped_data = {album: [] for album in self.albums}
         for path, data in items_to_upload:
             album = data['album'] if data['album'] in grouped_data else "Без альбома"
@@ -98,14 +96,14 @@ class UploaderThread(QThread):
 class ImageTagger(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Pro Image Tagger & Uploader")
+        self.setWindowTitle("Pro Image Tagger & Uploader (С поддержкой GIF)")
         self.resize(1200, 800)
         self.setStyleSheet(DARK_STYLESHEET)
         
-        # Структура данных: { path: {"desc": "описание", "album": "название"} }
         self.project_data = {}
         self.albums = ["Без альбома"]
         self.current_image_path = None
+        self.current_movie = None # Храним объект анимации гифки
         
         self.init_ui()
         
@@ -114,7 +112,6 @@ class ImageTagger(QMainWindow):
         self.setCentralWidget(main_widget)
         main_layout = QVBoxLayout(main_widget)
         
-        # --- ВЕРХНЯЯ ПАНЕЛЬ ИНСТРУМЕНТОВ ---
         toolbar = QHBoxLayout()
         self.btn_load_folder = QPushButton("📁 Выбрать папку")
         self.btn_load_project = QPushButton("📂 Загрузить проект")
@@ -131,16 +128,13 @@ class ImageTagger(QMainWindow):
         toolbar.addWidget(self.btn_upload)
         main_layout.addLayout(toolbar)
         
-        # Разделитель
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setStyleSheet("background-color: #45475a;")
         main_layout.addWidget(line)
         
-        # --- ОСНОВНАЯ РАБОЧАЯ ЗОНА ---
         work_layout = QHBoxLayout()
         
-        # 1. Левая панель (Управление альбомами)
         album_layout = QVBoxLayout()
         album_layout.addWidget(QLabel("Управление альбомами:"))
         self.album_list = QListWidget()
@@ -152,7 +146,6 @@ class ImageTagger(QMainWindow):
         album_layout.addWidget(self.btn_add_album)
         work_layout.addLayout(album_layout)
         
-        # 2. Центральная панель (Просмотр и редактирование)
         center_layout = QVBoxLayout()
         self.image_label = QLabel("Выберите папку или загрузите проект")
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -162,7 +155,7 @@ class ImageTagger(QMainWindow):
         
         editor_layout = QHBoxLayout()
         self.desc_input = QLineEdit()
-        self.desc_input.setPlaceholderText("Описание фото...")
+        self.desc_input.setPlaceholderText("Описание фото или гифки...")
         self.album_selector = QComboBox()
         self.album_selector.addItems(self.albums)
         
@@ -180,9 +173,8 @@ class ImageTagger(QMainWindow):
         
         work_layout.addLayout(center_layout, stretch=3)
         
-        # 3. Правая панель (Карусель всех фото)
         right_layout = QVBoxLayout()
-        right_layout.addWidget(QLabel("Все фотографии:"))
+        right_layout.addWidget(QLabel("Медиафайлы:"))
         self.carousel = QListWidget()
         self.carousel.setViewMode(QListWidget.ViewMode.IconMode)
         self.carousel.setIconSize(QSize(100, 100))
@@ -193,7 +185,6 @@ class ImageTagger(QMainWindow):
         
         main_layout.addLayout(work_layout, stretch=1)
         
-        # --- СИГНАЛЫ ---
         self.btn_load_folder.clicked.connect(self.load_folder)
         self.btn_load_project.clicked.connect(self.load_project)
         self.btn_save_project.clicked.connect(self.save_project)
@@ -214,7 +205,6 @@ class ImageTagger(QMainWindow):
             self.albums.append(name)
             self.album_list.addItem(name)
             
-            # Обновляем комбобокс без срабатывания сигнала
             self.album_selector.blockSignals(True)
             self.album_selector.addItem(name)
             self.album_selector.blockSignals(False)
@@ -226,7 +216,8 @@ class ImageTagger(QMainWindow):
         self.carousel.clear()
         self.project_data.clear()
         
-        valid_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp')
+        # Добавили .gif в разрешенные форматы
+        valid_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp', '.gif')
         for file in os.listdir(folder):
             if file.lower().endswith(valid_exts):
                 full_path = os.path.join(folder, file)
@@ -257,18 +248,15 @@ class ImageTagger(QMainWindow):
         self.carousel.clear()
         self.project_data.clear()
         
-        # Поддержка старого формата сохранений (где были только {путь: описание})
         if "images" not in data:
             self.albums = ["Без альбома"]
             for img_path, desc in data.items():
                 if isinstance(desc, str):
                     self.project_data[img_path] = {"desc": desc, "album": "Без альбома"}
         else:
-            # Новый формат
             self.albums = data.get("albums", ["Без альбома"])
             self.project_data = data.get("images", {})
             
-        # Обновляем списки альбомов
         self.album_list.clear()
         self.album_list.addItems(self.albums)
         
@@ -277,7 +265,6 @@ class ImageTagger(QMainWindow):
         self.album_selector.addItems(self.albums)
         self.album_selector.blockSignals(False)
 
-        # Загружаем фото в карусель
         for img_path in self.project_data.keys():
             if os.path.exists(img_path):
                 self.add_to_carousel(img_path, os.path.basename(img_path))
@@ -302,13 +289,35 @@ class ImageTagger(QMainWindow):
 
     def display_image(self, path):
         self.current_image_path = path
-        pixmap = QPixmap(path)
-        pixmap = pixmap.scaled(self.image_label.size(), Qt.AspectRatioMode.KeepAspectRatio)
-        self.image_label.setPixmap(pixmap)
+        
+        # Очищаем предыдущую гифку, если она проигрывалась
+        if self.current_movie:
+            self.current_movie.stop()
+            self.current_movie = None
+            self.image_label.clear()
+
+        # Разделяем логику отрисовки для GIF и обычных картинок
+        if path.lower().endswith('.gif'):
+            self.current_movie = QMovie(path)
+            
+            # Прыгаем на первый кадр, чтобы узнать оригинальный размер гифки
+            self.current_movie.jumpToFrame(0)
+            orig_size = self.current_movie.frameRect().size()
+            
+            # Масштабируем гифку с сохранением пропорций
+            if orig_size.isValid() and not orig_size.isEmpty():
+                scaled_size = orig_size.scaled(self.image_label.size(), Qt.AspectRatioMode.KeepAspectRatio)
+                self.current_movie.setScaledSize(scaled_size)
+                
+            self.image_label.setMovie(self.current_movie)
+            self.current_movie.start() # Запускаем анимацию
+        else:
+            pixmap = QPixmap(path)
+            pixmap = pixmap.scaled(self.image_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.image_label.setPixmap(pixmap)
         
         img_data = self.project_data.get(path, {"desc": "", "album": "Без альбома"})
         
-        # Отключаем сигналы, чтобы не перезаписать данные при обновлении полей
         self.desc_input.blockSignals(True)
         self.album_selector.blockSignals(True)
         
@@ -344,7 +353,6 @@ class ImageTagger(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, "Экспорт", "local_export.txt", "Text Files (*.txt)")
         if not path: return
         
-        # Группируем локально для txt
         grouped = {a: [] for a in self.albums}
         for img_path, data in self.project_data.items():
             if data['desc'].strip():
